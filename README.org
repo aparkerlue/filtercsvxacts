@@ -6,8 +6,8 @@
 +This command accepts a CSV file of financial transactions and prints
 records that are not found in a repository of CSV files.+
 
-This project is in development.  Right now it parses a CSV file and
-prints its contents.  For example, using [[https://github.com/commercialhaskell/stack/][Stack]]:
+This project is in development.  Right now it parses [[https://datatracker.ietf.org/doc/html/rfc4180][RFC 4180]] CSV
+files and prints their contents.  For example, using [[https://github.com/commercialhaskell/stack/][Stack]]:
 #+begin_example
 $ cat <<EOF >example.csv; stack run example.csv
 "a b",c
