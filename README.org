@@ -1,7 +1,20 @@
 # -*- mode: org; -*-
 #+TITLE: filtercsvxacts
 
-Filter CSV transactions that are not present in a repository.
++Filter CSV transactions that are not present in a repository.+
 
-This command accepts a CSV file of financial transactions and prints
-records that are not found in a repository of CSV files.
++This command accepts a CSV file of financial transactions and prints
+records that are not found in a repository of CSV files.+
+
+This project is in development.  Right now it parses a CSV file and
+prints its contents.  For example, using [[https://github.com/commercialhaskell/stack/][Stack]]:
+#+begin_example
+$ cat <<EOF >example.csv; stack run example.csv
+"a b",c
+"Foxy Badger",2
+Dreary Hog,1
+EOF
+a b|c
+Foxy Badger|2
+Dreary Hog|1
+#+end_example
