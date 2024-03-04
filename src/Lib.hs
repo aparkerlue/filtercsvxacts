@@ -21,7 +21,9 @@ parseArgs xs = if length xs == 1
 
 nonEscDQuoteIndex :: String -> Maybe Int
 nonEscDQuoteIndex "" = Nothing
-nonEscDQuoteIndex ('"':'"':xs) = nonEscDQuoteIndex xs
+nonEscDQuoteIndex ('"':'"':xs) = case nonEscDQuoteIndex xs of
+                                   Just n -> Just (n + 2)
+                                   Nothing -> Nothing
 nonEscDQuoteIndex ('"':_) = Just 0
 nonEscDQuoteIndex (_:xs) = case nonEscDQuoteIndex xs of Just n -> Just (n + 1)
                                                         Nothing -> Nothing
