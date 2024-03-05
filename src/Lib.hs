@@ -53,33 +53,36 @@ getRestOfQuotedField xs = case nonEscDQuoteIndex xs of
         afterQuotedField ys = Just ys
 
 nextUnquotedField :: String -> (String, Maybe String)
-nextUnquotedField xs = (take i xs, remainder)
+nextUnquotedField xs = (take i xs, rest)
   where i = fieldEndIndex xs
-        rest = drop i xs
-        remainder = if length xs > i
-                    then Just $ if head rest == ',' then drop 1 rest else rest
-                    else Nothing
+        rest = case drop i xs of "" -> Nothing
+                                 ',':ys -> Just ys
+                                 ys -> Just ys
 
-nextRecord :: String -> ([String], Maybe String)
+type Record = [String]
+
+nextRecord' :: Record -> Maybe String -> (Record, Maybe String)
+nextRecord' fs (Just "") = (fs, Nothing)
+nextRecord' fs (Just ('\n':xs))
+  | length xs > 0 = (fs, Just xs)
+  | otherwise     = (fs, Nothing)
+nextRecord' fs (Just (',':xs)) = nextRecord' (fs ++ [""]) (Just xs)
+nextRecord' fs (Just ('"':xs)) = nextRecord' (fs ++ [field]) xs'
+  where (field, xs') = getRestOfQuotedField xs
+nextRecord' fs (Just xs) = nextRecord' (fs ++ [field]) xs'
+  where (field, xs') = nextUnquotedField xs
+nextRecord' fs Nothing = (fs, Nothing)
+
+nextRecord :: String -> (Record, Maybe String)
 nextRecord x = nextRecord' [] (Just x)
-  where nextRecord' :: [String] -> Maybe String -> ([String], Maybe String)
-        nextRecord' fs (Just "") = (fs, Nothing)
-        nextRecord' fs (Just ('\n':xs)) = (fs, if xs /= ""
-                                               then Just xs
-                                               else Nothing)
-        nextRecord' fs (Just (',':xs)) = nextRecord' (fs ++ [""]) (Just xs)
-        nextRecord' fs (Just ('"':xs)) = nextRecord' (fs ++ [field]) xs'
-          where (field, xs') = getRestOfQuotedField xs
-        nextRecord' fs (Just xs) = nextRecord' (fs ++ [field]) xs'
-          where (field, xs') = nextUnquotedField xs
-        nextRecord' fs Nothing = (fs, Nothing)
 
-parseCsv :: String -> [[String]]
+parseCsv' :: [Record] -> Maybe String -> [Record]
+parseCsv' rs (Just x) = parseCsv' (rs ++ [r]) x'
+  where (r, x') = nextRecord x
+parseCsv' rs Nothing = rs
+
+parseCsv :: String -> [Record]
 parseCsv s = parseCsv' [] (Just s)
-  where parseCsv' :: [[String]] -> Maybe String -> [[String]]
-        parseCsv' rs (Just x) = parseCsv' (rs ++ [r]) x'
-          where (r, x') = nextRecord x
-        parseCsv' rs Nothing = rs
 
 printCsvFile :: FileName -> IO ()
 printCsvFile x = do
