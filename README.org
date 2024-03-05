@@ -11,21 +11,23 @@ files and prints their contents.  For example, using [[https://github.com/commer
 #+begin_example
 $ stack run <(cat <<EOF
 > №,Name
-> 1,"""Foxy"" Badger"
-> 2,Dreary Hog
+> 1,Foxy Badger
+> 2,"""Dreary"" Hog"
+> 3,Furry Walrus
 > EOF
->
 >            )
 №|Name
-1|"Foxy" Badger
-2|Dreary Hog
+1|Foxy Badger
+2|"Dreary" Hog
+3|Furry Walrus
 #+end_example
 You can run the foregoing example in [[https://www.gnu.org/software/bash/][Bash]]:
 #+begin_src bash
 stack run <(cat <<EOF
 №,Name
-1,"""Foxy"" Badger"
-2,Dreary Hog
+1,Foxy Badger
+2,"""Dreary"" Hog"
+3,Furry Walrus
 EOF
            )
 #+end_src
@@ -33,7 +35,8 @@ Or in [[https://fishshell.com/][fish]]:
 #+begin_src fish
 stack run (echo -n '
 №,Name
-1,"""Foxy"" Badger"
-2,Dreary Hog
+1,Foxy Badger
+2,"""Dreary"" Hog"
+3,Furry Walrus
 ' | tail -n +2 | psub)
 #+end_src

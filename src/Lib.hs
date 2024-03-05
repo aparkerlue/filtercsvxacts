@@ -33,34 +33,63 @@ unescDQuotes ('"':'"':xs) = '"':(unescDQuotes xs)
 unescDQuotes (x:xs) = x:(unescDQuotes xs)
 unescDQuotes xs = xs
 
-splitNextField :: String -> (String, String)
-splitNextField (',':xs) = splitNextField xs
-splitNextField xss@('"':xs) = case nonEscDQuoteIndex xs of
-                                Just i -> (unescDQuotes (take i xs)
-                                          , drop (i + 1) xs)
-                                Nothing -> (xss, "")
-splitNextField xs = case elemIndex ',' xs of
-                      Just i -> (take i xs, drop (i + 1) xs)
-                      Nothing -> (xs, "")
+fieldEndIndex :: String -> Int
+fieldEndIndex xs = case (commaIndex, crlfIndex) of
+                     (Just i, Just j) -> min i j
+                     (Just i, Nothing) -> i
+                     (Nothing, Just j) -> j
+                     (Nothing, Nothing) -> length xs
+  where commaIndex = elemIndex ',' xs
+        crlfIndex = elemIndex '\n' xs
 
-parseFields :: [String] -> String -> [String]
-parseFields xs "" = xs
-parseFields xs s = parseFields (xs ++ [field]) rest
-  where (field, rest) = splitNextField s
+getRestOfQuotedField :: String -> (String, Maybe String)
+getRestOfQuotedField xs = case nonEscDQuoteIndex xs of
+                            Just i -> (unescDQuotes $ take i xs,
+                                        afterQuotedField $ drop (i + 1) xs)
+                            Nothing -> (xs, Nothing)
+  where afterQuotedField whole@('\n':_) = Just whole
+        afterQuotedField (',':ys) = Just ys
+        afterQuotedField "" = Nothing
+        afterQuotedField ys = Just ys
 
-parseRecord :: String -> [String]
-parseRecord r = parseFields [] r
+nextUnquotedField :: String -> (String, Maybe String)
+nextUnquotedField xs = (take i xs, remainder)
+  where i = fieldEndIndex xs
+        rest = drop i xs
+        remainder = if length xs > i
+                    then Just $ if head rest == ',' then drop 1 rest else rest
+                    else Nothing
 
-printCSVFile :: FileName -> IO ()
-printCSVFile x = do
+nextRecord :: String -> ([String], Maybe String)
+nextRecord x = nextRecord' [] (Just x)
+  where nextRecord' :: [String] -> Maybe String -> ([String], Maybe String)
+        nextRecord' fs (Just "") = (fs, Nothing)
+        nextRecord' fs (Just ('\n':xs)) = (fs, if xs /= ""
+                                               then Just xs
+                                               else Nothing)
+        nextRecord' fs (Just (',':xs)) = nextRecord' (fs ++ [""]) (Just xs)
+        nextRecord' fs (Just ('"':xs)) = nextRecord' (fs ++ [field]) xs'
+          where (field, xs') = getRestOfQuotedField xs
+        nextRecord' fs (Just xs) = nextRecord' (fs ++ [field]) xs'
+          where (field, xs') = nextUnquotedField xs
+        nextRecord' fs Nothing = (fs, Nothing)
+
+parseCsv :: String -> [[String]]
+parseCsv s = parseCsv' [] (Just s)
+  where parseCsv' :: [[String]] -> Maybe String -> [[String]]
+        parseCsv' rs (Just x) = parseCsv' (rs ++ [r]) x'
+          where (r, x') = nextRecord x
+        parseCsv' rs Nothing = rs
+
+printCsvFile :: FileName -> IO ()
+printCsvFile x = do
   contents <- readFile x
-  let records = lines contents
-  _ <- mapM putStrLn (map (intercalate "|" . parseRecord) records)
+  _ <- mapM (putStrLn . intercalate "|") $ parseCsv contents
   return ()
 
 cli :: IO ()
 cli = do
   args <- getArgs
   case parseArgs args of
-    Left x -> printCSVFile x
+    Left x -> printCsvFile x
     Right x -> exitWithErrorMessage ("error: " ++ x) (ExitFailure 1)
