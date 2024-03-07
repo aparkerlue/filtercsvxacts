@@ -3,7 +3,7 @@ module Lib
     , parseArgs
     ) where
 
-import Data.List (elemIndex, intercalate)
+import Data.List (intercalate)
 import System.Environment
 import System.Exit
 import System.IO
@@ -15,79 +15,93 @@ exitWithErrorMessage :: ErrorMessage -> ExitCode -> IO ()
 exitWithErrorMessage m e = hPutStrLn stderr m >> exitWith e
 
 parseArgs :: [String] -> Either FileName ErrorMessage
-parseArgs xs = if length xs == 1
-               then Left (head xs)
-               else Right "expected one argument"
+parseArgs (x:[]) = Left x
+parseArgs _ = Right "expected one argument"
 
-nonEscDQuoteIndex :: String -> Maybe Int
-nonEscDQuoteIndex "" = Nothing
-nonEscDQuoteIndex ('"':'"':xs) = case nonEscDQuoteIndex xs of
-                                   Just n -> Just (n + 2)
-                                   Nothing -> Nothing
-nonEscDQuoteIndex ('"':_) = Just 0
-nonEscDQuoteIndex (_:xs) = case nonEscDQuoteIndex xs of Just n -> Just (n + 1)
-                                                        Nothing -> Nothing
+-- |Return the index of the closing quote of a double-quoted string.
+-- This function assumes that the opening quote is not present in the
+-- argument.
+quoteEndIndex :: String -> Int
+quoteEndIndex "" = 0
+quoteEndIndex ('"':'"':xs) = 2 + quoteEndIndex xs
+quoteEndIndex ('"':_) = 1
+quoteEndIndex (_:xs) = 1 + quoteEndIndex xs
 
-unescDQuotes :: String -> String
-unescDQuotes ('"':'"':xs) = '"':(unescDQuotes xs)
-unescDQuotes (x:xs) = x:(unescDQuotes xs)
-unescDQuotes xs = xs
-
+-- |Return the index of the end of the first CSV field in the string.
 fieldEndIndex :: String -> Int
-fieldEndIndex xs = case (commaIndex, crlfIndex) of
-                     (Just i, Just j) -> min i j
-                     (Just i, Nothing) -> i
-                     (Nothing, Just j) -> j
-                     (Nothing, Nothing) -> length xs
-  where commaIndex = elemIndex ',' xs
-        crlfIndex = elemIndex '\n' xs
+fieldEndIndex "" = 0
+fieldEndIndex ('\n':_) = 0
+fieldEndIndex ('\r':'\n':_) = 0
+fieldEndIndex ('"':xs) = 1 + i + (fieldEndIndex $ drop i xs)
+  where i = quoteEndIndex xs
+fieldEndIndex (',':_) = 0
+fieldEndIndex (_:xs) = 1 + fieldEndIndex xs
 
-getRestOfQuotedField :: String -> (String, Maybe String)
-getRestOfQuotedField xs = case nonEscDQuoteIndex xs of
-                            Just i -> (unescDQuotes $ take i xs,
-                                        afterQuotedField $ drop (i + 1) xs)
-                            Nothing -> (xs, Nothing)
-  where afterQuotedField whole@('\n':_) = Just whole
-        afterQuotedField (',':ys) = Just ys
-        afterQuotedField "" = Nothing
-        afterQuotedField ys = Just ys
+unquoteQuotedFieldRem :: String -> String
+unquoteQuotedFieldRem "" = ""
+unquoteQuotedFieldRem ('"':'"':xs) = '"':unquoteQuotedFieldRem xs
+unquoteQuotedFieldRem ('"':xs) = unquoteField xs
+unquoteQuotedFieldRem (x:xs) = x:unquoteQuotedFieldRem xs
 
-nextUnquotedField :: String -> (String, Maybe String)
-nextUnquotedField xs = (take i xs, rest)
+unquoteField :: String -> String
+unquoteField "" = ""
+unquoteField ('"':xs) = unquoteQuotedFieldRem xs
+unquoteField (x:xs) = x:unquoteField xs
+
+data ParsedField = ParsedField { fieldContent :: String
+                               , endOfRecord :: Bool
+                               } deriving (Show)
+
+nextField :: String -> (Maybe ParsedField, String)
+nextField "" = (Nothing, "")
+nextField xs
+  | rest /= xs = (Just $ ParsedField field eor, rest)
+  | otherwise = (Nothing, xs)
   where i = fieldEndIndex xs
-        rest = case drop i xs of "" -> Nothing
-                                 ',':ys -> Just ys
-                                 ys -> Just ys
+        field = unquoteField $ take i xs
+        (fieldEnd, rest) = case drop i xs of
+                             "" -> ("", "")
+                             '\n':ys -> ("\n", ys)
+                             '\r':'\n':ys -> ("\r\n", ys)
+                             ',':ys -> (",", ys)
+                             ys -> ("", ys)
+        eor = fieldEnd /= ","
 
 type Record = [String]
 
-nextRecord' :: Record -> Maybe String -> (Record, Maybe String)
-nextRecord' fs (Just "") = (fs, Nothing)
-nextRecord' fs (Just ('\n':xs))
-  | length xs > 0 = (fs, Just xs)
-  | otherwise     = (fs, Nothing)
-nextRecord' fs (Just (',':xs)) = nextRecord' (fs ++ [""]) (Just xs)
-nextRecord' fs (Just ('"':xs)) = nextRecord' (fs ++ [field]) xs'
-  where (field, xs') = getRestOfQuotedField xs
-nextRecord' fs (Just xs) = nextRecord' (fs ++ [field]) xs'
-  where (field, xs') = nextUnquotedField xs
-nextRecord' fs Nothing = (fs, Nothing)
+nextRecord' :: Record -> String -> (Record, String)
+nextRecord' fs xs =
+  case mpf of
+    Just (ParsedField {fieldContent = f, endOfRecord = True})
+      -> (fs ++ [f], rest)
+    Just (ParsedField {fieldContent = f, endOfRecord = False})
+      | rest == "" -> (fs ++ [f,""], "")
+      | otherwise -> nextRecord' (fs ++ [f]) rest
+    Nothing -> (fs, rest)
+  where (mpf, rest) = nextField xs
 
-nextRecord :: String -> (Record, Maybe String)
-nextRecord x = nextRecord' [] (Just x)
+nextRecord :: String -> (Record, String)
+nextRecord xs = nextRecord' [] xs
 
-parseCsv' :: [Record] -> Maybe String -> [Record]
-parseCsv' rs (Just x) = parseCsv' (rs ++ [r]) x'
-  where (r, x') = nextRecord x
-parseCsv' rs Nothing = rs
+parseCsv' :: [Record] -> String -> [Record]
+parseCsv' rs xs =
+  case r of
+    [] -> rs
+    _ -> parseCsv' (rs ++ [r]) rest
+  where (r, rest) = nextRecord xs
 
 parseCsv :: String -> [Record]
-parseCsv s = parseCsv' [] (Just s)
+parseCsv s = parseCsv' [] s
 
 printCsvFile :: FileName -> IO ()
 printCsvFile x = do
   contents <- readFile x
-  _ <- mapM (putStrLn . intercalate "|") $ parseCsv contents
+  let records = parseCsv contents
+  _ <- mapM (putStrLn . intercalate "|") $ records
+  putStrLn ""
+  putStrLn $ "Processed "
+    ++ (show $ length records)
+    ++ " records, possibly including a header."
   return ()
 
 cli :: IO ()
