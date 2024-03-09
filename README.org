@@ -28,7 +28,7 @@ EOF
  Walrus
 4|Absent Owl, Esq.
 
-Processed 5 records, including a header.
+Processed 4 records.
 #+end_example
 You can run the foregoing example in [[https://www.gnu.org/software/bash/][Bash]]:
 #+begin_src bash

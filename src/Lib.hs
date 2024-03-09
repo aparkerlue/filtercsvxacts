@@ -15,9 +15,9 @@ type FileName = String
 exitWithErrorMessage :: ErrorMessage -> ExitCode -> IO ()
 exitWithErrorMessage m e = hPutStrLn stderr m >> exitWith e
 
-parseArgs :: [String] -> Either FileName ErrorMessage
-parseArgs (x:[]) = Left x
-parseArgs _ = Right "expected one argument"
+parseArgs :: [String] -> Either [FileName] ErrorMessage
+parseArgs xs@(_:_) = Left xs
+parseArgs [] = Right "expected at least one argument"
 
 -- |Return the index of the closing quote of a double-quoted string.
 -- This function assumes that the opening quote is not present in the
@@ -106,6 +106,9 @@ data StrDoc = StrDoc
   , docRecords :: StrTable
   } deriving (Show)
 
+emtpyStrDoc :: StrDoc
+emtpyStrDoc = StrDoc [] []
+
 stHeader :: StrDoc -> [String]
 stHeader doc = first ++ [x | x <- found, not $ elem x first]
   where first = headerOrder doc
@@ -128,19 +131,27 @@ convStrDocToString xs = intercalate "\n" $ map (intercalate "|") $ header:record
   where header = stHeader xs
         records = stRecords xs
 
-printCsvFile :: FileName -> IO ()
-printCsvFile x = do
-  contents <- readFile x
-  let records = parseCsv contents
-  putStrLn $ convStrDocToString $ convRecordsToStrDoc records
+concatStrDocs :: StrDoc -> StrDoc -> StrDoc
+concatStrDocs x y = StrDoc headers records
+  where xheaders = headerOrder x
+        yheaders = headerOrder y
+        headers = xheaders ++ filter (\z -> not $ elem z xheaders) yheaders
+        xrecords = docRecords x
+        yrecords = docRecords y
+        records = xrecords ++ filter (\z -> not $ elem z xrecords) yrecords
+
+printStrDoc :: StrDoc -> IO ()
+printStrDoc x = do
+  putStrLn $ convStrDocToString x
   putStrLn ""
-  putStrLn $ "Processed "
-    ++ (show $ length records)
-    ++ " records, including a header."
+  putStrLn $ "Processed " ++ (show $ length $ docRecords x) ++ " records."
 
 cli :: IO ()
 cli = do
   args <- getArgs
   case parseArgs args of
-    Left x -> printCsvFile x
+    Left xs -> do
+      ys <- mapM readFile xs
+      printStrDoc $ foldr concatStrDocs emtpyStrDoc
+        $ map (convRecordsToStrDoc . parseCsv) ys
     Right x -> exitWithErrorMessage ("error: " ++ x) (ExitFailure 1)
