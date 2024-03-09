@@ -4,6 +4,7 @@ module Lib
     ) where
 
 import Data.List (intercalate)
+import qualified Data.Map as Map
 import System.Environment
 import System.Exit
 import System.IO
@@ -48,9 +49,10 @@ unquoteField "" = ""
 unquoteField ('"':xs) = unquoteQuotedFieldRem xs
 unquoteField (x:xs) = x:unquoteField xs
 
-data ParsedField = ParsedField { fieldContent :: String
-                               , endOfRecord :: Bool
-                               } deriving (Show)
+data ParsedField = ParsedField
+  { fieldContent :: String
+  , endOfRecord :: Bool
+  } deriving (Show)
 
 nextField :: String -> (Maybe ParsedField, String)
 nextField "" = (Nothing, "")
@@ -72,11 +74,11 @@ type Record = [String]
 nextRecord' :: Record -> String -> (Record, String)
 nextRecord' fs xs =
   case mpf of
-    Just (ParsedField {fieldContent = f, endOfRecord = True})
-      -> (fs ++ [f], rest)
-    Just (ParsedField {fieldContent = f, endOfRecord = False})
-      | rest == "" -> (fs ++ [f,""], "")
-      | otherwise -> nextRecord' (fs ++ [f]) rest
+    Just (ParsedField {fieldContent = x, endOfRecord = True})
+      -> (fs ++ [x], rest)
+    Just (ParsedField {fieldContent = x, endOfRecord = False})
+      | rest == "" -> (fs ++ [x,""], "")
+      | otherwise -> nextRecord' (fs ++ [x]) rest
     Nothing -> (fs, rest)
   where (mpf, rest) = nextField xs
 
@@ -93,16 +95,48 @@ parseCsv' rs xs =
 parseCsv :: String -> [Record]
 parseCsv s = parseCsv' [] s
 
+uniqConcat :: [String] -> [String] -> [String]
+uniqConcat xs ys = xs ++ [y | y <- ys, not $ elem y xs]
+
+type StrTable = [Map.Map String String]
+type Header = [String]
+
+data StrDoc = StrDoc
+  { headerOrder :: Header
+  , docRecords :: StrTable
+  } deriving (Show)
+
+stHeader :: StrDoc -> [String]
+stHeader doc = first ++ [x | x <- found, not $ elem x first]
+  where first = headerOrder doc
+        found = foldr uniqConcat [] $ map Map.keys $ docRecords doc
+
+stRecord :: Header -> Map.Map String String -> Record
+stRecord hs m = [case v of Just x -> x
+                           Nothing -> ""
+                | v <- map (\h -> Map.lookup h m) hs]
+
+stRecords :: StrDoc -> [Record]
+stRecords x = map (stRecord $ stHeader x) $ docRecords x
+
+convRecordsToStrDoc :: [Record] -> StrDoc
+convRecordsToStrDoc [] = StrDoc [] []
+convRecordsToStrDoc (h:rs) = StrDoc h $ map (\x -> Map.fromList $ zip h x) rs
+
+convStrDocToString :: StrDoc -> String
+convStrDocToString xs = intercalate "\n" $ map (intercalate "|") $ header:records
+  where header = stHeader xs
+        records = stRecords xs
+
 printCsvFile :: FileName -> IO ()
 printCsvFile x = do
   contents <- readFile x
   let records = parseCsv contents
-  _ <- mapM (putStrLn . intercalate "|") $ records
+  putStrLn $ convStrDocToString $ convRecordsToStrDoc records
   putStrLn ""
   putStrLn $ "Processed "
     ++ (show $ length records)
-    ++ " records, possibly including a header."
-  return ()
+    ++ " records, including a header."
 
 cli :: IO ()
 cli = do
