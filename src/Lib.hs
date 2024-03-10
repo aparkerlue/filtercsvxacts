@@ -3,8 +3,11 @@ module Lib
     , parseArgs
     ) where
 
+import Control.Monad (filterM)
 import Data.List (intercalate)
 import qualified Data.Map as Map
+import Directory (hasSuffix, listDirectoryRecursive)
+import System.Directory (doesFileExist)
 import System.Environment
 import System.Exit
 import System.IO
@@ -127,7 +130,9 @@ convRecordsToStrDoc [] = StrDoc [] []
 convRecordsToStrDoc (h:rs) = StrDoc h $ map (\x -> Map.fromList $ zip h x) rs
 
 convStrDocToString :: StrDoc -> String
-convStrDocToString xs = intercalate "\n" $ map (intercalate "|") $ header:records
+convStrDocToString xs = intercalate "\n"
+  $ map (intercalate "|")
+  $ header:records
   where header = stHeader xs
         records = stRecords xs
 
@@ -151,7 +156,12 @@ cli = do
   args <- getArgs
   case parseArgs args of
     Left xs -> do
-      ys <- mapM readFile xs
-      printStrDoc $ foldr concatStrDocs emtpyStrDoc
-        $ map (convRecordsToStrDoc . parseCsv) ys
+      everything <- mapM listDirectoryRecursive xs
+      justcsvfiles <- filterM doesFileExist
+        $ filter (hasSuffix "csv")
+        $ concat everything
+      allRecords <- mapM readFile justcsvfiles
+      printStrDoc
+        $ foldr concatStrDocs emtpyStrDoc
+        $ map (convRecordsToStrDoc . parseCsv) allRecords
     Right x -> exitWithErrorMessage ("error: " ++ x) (ExitFailure 1)
