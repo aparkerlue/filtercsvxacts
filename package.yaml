@@ -23,6 +23,8 @@ dependencies:
 - base >= 4.7 && < 5
 - HUnit
 - containers
+- directory
+- filepath
 
 ghc-options:
 - -Wall
