@@ -4,7 +4,7 @@ import Test.HUnit
 parseArgsTest :: Test
 parseArgsTest = TestCase (assertEqual
                            "call with valid arguments"
-                           (Left "a.csv")
+                           (Left ["a.csv"])
                            (parseArgs ["a.csv"]))
 
 main :: IO Counts
