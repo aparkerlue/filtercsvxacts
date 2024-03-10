@@ -4,8 +4,9 @@ module Lib
     ) where
 
 import Control.Monad (filterM)
-import Data.List (intercalate)
+import Data.List ((\\), intercalate)
 import qualified Data.Map as Map
+import Data.Text (pack, replace, unpack)
 import Directory (hasSuffix, listDirectoryRecursive)
 import System.Directory (doesFileExist)
 import System.Environment
@@ -13,12 +14,11 @@ import System.Exit
 import System.IO
 
 type ErrorMessage = String
-type FileName = String
 
 exitWithErrorMessage :: ErrorMessage -> ExitCode -> IO ()
 exitWithErrorMessage m e = hPutStrLn stderr m >> exitWith e
 
-parseArgs :: [String] -> Either [FileName] ErrorMessage
+parseArgs :: [String] -> Either [FilePath] ErrorMessage
 parseArgs xs@(_:_) = Left xs
 parseArgs [] = Right "expected at least one argument"
 
@@ -112,6 +112,17 @@ data StrDoc = StrDoc
 emtpyStrDoc :: StrDoc
 emtpyStrDoc = StrDoc [] []
 
+stFromFilePaths :: [FilePath] -> IO StrDoc
+stFromFilePaths xs = do
+  everything <- mapM listDirectoryRecursive xs
+  justcsvfiles <- filterM doesFileExist
+                  $ filter (hasSuffix "csv")
+                  $ concat everything
+  allRecords <- mapM readFile justcsvfiles
+  return
+    $ foldr concatStrDocs emtpyStrDoc
+    $ map (convRecordsToStrDoc . parseCsv) allRecords
+
 stHeader :: StrDoc -> [String]
 stHeader doc = first ++ [x | x <- found, not $ elem x first]
   where first = headerOrder doc
@@ -125,16 +136,25 @@ stRecord hs m = [case v of Just x -> x
 stRecords :: StrDoc -> [Record]
 stRecords x = map (stRecord $ stHeader x) $ docRecords x
 
+stDiff :: StrDoc -> StrDoc -> StrDoc
+stDiff x y = StrDoc (headerOrder x) (docRecords x \\ docRecords y)
+
 convRecordsToStrDoc :: [Record] -> StrDoc
 convRecordsToStrDoc [] = StrDoc [] []
 convRecordsToStrDoc (h:rs) = StrDoc h $ map (\x -> Map.fromList $ zip h x) rs
 
+csvQuote :: String -> String
+csvQuote xs
+  | elem '\n' xs || elem '"' xs || elem ',' xs = "\"" ++ escdq xs ++ "\""
+  | otherwise = xs
+  where escdq = unpack . replace (pack "\"") (pack "\"\"") . pack
+
 convStrDocToString :: StrDoc -> String
 convStrDocToString xs = intercalate "\n"
-  $ map (intercalate "|")
+  $ map (intercalate ",")
   $ header:records
-  where header = stHeader xs
-        records = stRecords xs
+  where header = map csvQuote $ stHeader xs
+        records = map (map csvQuote) $ stRecords xs
 
 concatStrDocs :: StrDoc -> StrDoc -> StrDoc
 concatStrDocs x y = StrDoc headers records
@@ -148,20 +168,16 @@ concatStrDocs x y = StrDoc headers records
 printStrDoc :: StrDoc -> IO ()
 printStrDoc x = do
   putStrLn $ convStrDocToString x
-  putStrLn ""
-  putStrLn $ "Processed " ++ (show $ length $ docRecords x) ++ " records."
 
 cli :: IO ()
 cli = do
   args <- getArgs
   case parseArgs args of
+    Left (x:xs) -> do
+      stx <- stFromFilePaths [x]
+      stxs <- stFromFilePaths xs
+      printStrDoc $ stDiff stx stxs
     Left xs -> do
-      everything <- mapM listDirectoryRecursive xs
-      justcsvfiles <- filterM doesFileExist
-        $ filter (hasSuffix "csv")
-        $ concat everything
-      allRecords <- mapM readFile justcsvfiles
-      printStrDoc
-        $ foldr concatStrDocs emtpyStrDoc
-        $ map (convRecordsToStrDoc . parseCsv) allRecords
+      stx <- stFromFilePaths xs
+      printStrDoc stx
     Right x -> exitWithErrorMessage ("error: " ++ x) (ExitFailure 1)
